@@ -8,9 +8,17 @@
     "start": "next start"
   },
   "dependencies": {
+    "@prisma/client": "^6.9.0",
+    "@tanstack/react-table": "^8.21.3",
+    "lucide-react": "^1.17.0",
+    "mammoth": "^1.12.0",
     "next": "16.2.6",
+    "pdf-parse": "^2.4.5",
+    "prisma": "^6.9.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sonner": "^2.0.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
