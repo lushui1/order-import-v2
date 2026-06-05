@@ -27,7 +27,7 @@ export default function HomePage() {
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || loading) return;
     setLoading('上传中...');
 
     try {

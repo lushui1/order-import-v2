@@ -59,10 +59,19 @@ function getSheets(wb: XLSX.WorkBook, rule: ParseRule): string[] {
 
 // 标准表格解析
 function parseStandard(data: any[][], rule: ParseRule): ParsedRow[] {
-  const headerRow = (rule.headerRow || 1) - 1;
-  const dataStart = (rule.dataStartRow || (headerRow + 2)) - 1;
+  let headerRow = (rule.headerRow || 1) - 1;
+  let dataStart = (rule.dataStartRow || (headerRow + 2)) - 1;
   const dataEnd = rule.dataEndRow ? rule.dataEndRow - 1 : data.length;
   const skipRows = new Set((rule.skipRows || []).map(r => r - 1));
+  
+  // 如果没有指定表头行，尝试自动检测
+  if (!rule.headerRow) {
+    const detected = detectHeaderRow(data);
+    if (detected >= 0) {
+      headerRow = detected;
+      dataStart = detected + 1;
+    }
+  }
   
   // 获取表头
   const headers = (data[headerRow] || []).map((h: any) => String(h || '').trim());
@@ -78,6 +87,8 @@ function parseStandard(data: any[][], rule: ParseRule): ParsedRow[] {
     // 跳过合计行
     const firstCell = String(row[0] || '').trim();
     if (firstCell.includes('合计') || firstCell.includes('总计')) continue;
+    // 跳过表头重复行
+    if (isHeaderRow(row, headers)) continue;
     
     const mapped = applyMappings(row, headers, rule.mappings);
     const errors = validateRow(mapped);
@@ -90,6 +101,32 @@ function parseStandard(data: any[][], rule: ParseRule): ParsedRow[] {
   }
   
   return results;
+}
+
+// 自动检测表头行
+function detectHeaderRow(data: any[][]): number {
+  const headerKeywords = ['编码', '名称', '数量', '规格', '备注', '电话', '地址', '门店', 'SKU', '商品'];
+  
+  for (let i = 0; i < Math.min(10, data.length); i++) {
+    const row = data[i] || [];
+    const rowStr = row.map((c: any) => String(c || '')).join(' ');
+    
+    let matchCount = 0;
+    for (const kw of headerKeywords) {
+      if (rowStr.includes(kw)) matchCount++;
+    }
+    
+    if (matchCount >= 3) return i;
+  }
+  
+  return 0; // 默认第一行
+}
+
+// 检查是否是表头重复行
+function isHeaderRow(row: any[], headers: string[]): boolean {
+  const rowStr = row.map((c: any) => String(c || '').trim()).join('|');
+  const headerStr = headers.join('|');
+  return rowStr === headerStr;
 }
 
 // 卡片式解析
@@ -170,11 +207,24 @@ function applyMappings(row: any[], headers: string[], mappings: ColumnMapping[])
     if (colIdx >= 0 && colIdx < row.length) {
       value = String(row[colIdx] ?? '').trim();
     } else {
-      // 按表头名匹配
-      const idx = headers.findIndex(h => h === m.source || h.includes(m.source));
+      // 按表头名匹配（模糊匹配）
+      const idx = headers.findIndex(h => {
+        const hLower = h.toLowerCase();
+        const sLower = m.source.toLowerCase();
+        return h === m.source || 
+               h.includes(m.source) || 
+               m.source.includes(h) ||
+               hLower.includes(sLower) ||
+               sLower.includes(hLower);
+      });
       if (idx >= 0 && idx < row.length) {
         value = String(row[idx] ?? '').trim();
       }
+    }
+    
+    // 如果映射失败，尝试智能匹配
+    if (!value && m.target) {
+      value = smartMatch(row, headers, m.target);
     }
     
     // 转换
@@ -195,6 +245,38 @@ function applyMappings(row: any[], headers: string[], mappings: ColumnMapping[])
   }
   
   return result;
+}
+
+// 智能匹配列
+function smartMatch(row: any[], headers: string[], target: string): string {
+  const targetLower = target.toLowerCase();
+  
+  // 定义关键词映射
+  const keywords: Record<string, string[]> = {
+    'externalCode': ['外部编码', '外部单号', '单号', '订单号', '编号', 'code', 'order'],
+    'receiverStore': ['门店', '店铺', '收货门店', '收货店铺', 'store', 'shop'],
+    'receiverName': ['收货人', '收件人', '姓名', '联系人', 'name', 'receiver'],
+    'receiverPhone': ['电话', '手机', '联系电话', '收货电话', 'phone', 'tel'],
+    'receiverAddress': ['地址', '收货地址', '收件地址', 'address', 'addr'],
+    'skuCode': ['编码', '商品编码', 'SKU', '货号', '物料编码', 'code', 'sku'],
+    'skuName': ['名称', '商品名称', '品名', '物品名称', 'name', 'product'],
+    'skuQuantity': ['数量', '发货数量', '出库数量', 'qty', 'quantity', 'count'],
+    'skuSpec': ['规格', '规格型号', '型号', 'spec', 'model'],
+    'remark': ['备注', '说明', 'remark', 'note', 'memo'],
+  };
+
+  const targetKeywords = keywords[target] || [];
+  
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i].toLowerCase();
+    for (const kw of targetKeywords) {
+      if (h.includes(kw.toLowerCase())) {
+        return String(row[i] ?? '').trim();
+      }
+    }
+  }
+  
+  return '';
 }
 
 // 提取尾部信息

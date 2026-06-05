@@ -35,6 +35,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '文件不存在，请重新上传' }, { status: 404 });
     }
     
+    // 检查是否已有解析结果
+    const existingOrders = await prisma.order.count({
+      where: { importId },
+    });
+    
+    if (existingOrders > 0) {
+      // 删除旧记录重新解析
+      await prisma.order.deleteMany({ where: { importId } });
+    }
+    
     // 更新状态
     await prisma.import.update({
       where: { id: importId },

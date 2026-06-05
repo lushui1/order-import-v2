@@ -13,6 +13,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请上传文件' }, { status: 400 });
     }
     
+    // 检查是否在5分钟内有相同文件名的导入
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const existingImport = await prisma.import.findFirst({
+      where: {
+        fileName: file.name,
+        createdAt: { gte: fiveMinutesAgo },
+        status: { in: ['pending', 'parsing', 'parsed'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    
+    if (existingImport) {
+      // 返回已存在的导入记录
+      return NextResponse.json({
+        importId: existingImport.id,
+        fileName: existingImport.fileName,
+        fileSize: 0,
+        isDuplicate: true,
+      });
+    }
+    
     // 读取文件
     const buffer = Buffer.from(await file.arrayBuffer());
     
