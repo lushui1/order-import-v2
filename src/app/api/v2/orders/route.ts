@@ -15,8 +15,15 @@ function unauthorized() {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 }
 
+function dbUnavailable() {
+  return NextResponse.json({
+    error: 'V2 数据库暂未连接，请配置 DATABASE_URL',
+    hint: '请等待 GitHub 推送自动部署或联系管理员配置数据库'
+  }, { status: 503 });
+}
+
 /**
- * GET /api/v2/orders?page=1&pageSize=50&status=active
+ * GET /api/v2/orders?page=1&pageSize=50
  * 按条件查询运单列表（分页）
  */
 export async function GET(req: NextRequest) {
@@ -27,7 +34,6 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
 
-    // Order 表没有 status 字段，忽略 status 筛选
     const where: any = {};
 
     const [orders, total] = await Promise.all([
@@ -48,7 +54,7 @@ export async function GET(req: NextRequest) {
         receiverName: o.receiverName,
         receiverPhone: o.receiverPhone,
         receiverAddress: o.receiverAddress,
-        totalAmount: 0,       // Order 表无金额字段，V3 侧兼容
+        totalAmount: 0,
         skuCode: o.skuCode,
         skuName: o.skuName,
         skuQuantity: o.skuQuantity,
@@ -61,6 +67,11 @@ export async function GET(req: NextRequest) {
       totalPages: Math.ceil(total / pageSize),
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // 任何错误都返回结构化信息，不做 500 crash
+    return NextResponse.json({
+      error: error.message || '未知错误',
+      hint: 'V2 数据库暂未连接或查询失败，请配置 DATABASE_URL',
+      shouldDegrade: true,
+    }, { status: 503 });
   }
 }
