@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
-type OrderRow = Awaited<ReturnType<typeof prisma.order.findMany>>[number];
-
 // ── 简单 API Key 鉴权 ──
 const API_KEY = process.env.V2_API_KEY || 'dev-key';
 
@@ -15,16 +13,9 @@ function unauthorized() {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 }
 
-function dbUnavailable() {
-  return NextResponse.json({
-    error: 'V2 数据库暂未连接，请配置 DATABASE_URL',
-    hint: '请等待 GitHub 推送自动部署或联系管理员配置数据库'
-  }, { status: 503 });
-}
-
 /**
  * GET /api/v2/orders?page=1&pageSize=50
- * 按条件查询运单列表（分页）
+ * 按条件查询运单列表（分页）— 使用 raw SQL 适配实际表结构
  */
 export async function GET(req: NextRequest) {
   if (!checkAuth(req)) return unauthorized();
@@ -33,32 +24,33 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
+    const offset = (page - 1) * pageSize;
 
-    const where: any = {};
-
-    const [orders, total] = await Promise.all([
-      prisma.order.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.order.count({ where }),
-    ]);
+    // 使用 raw SQL 适配实际 orders 表的列名
+    const orders = await prisma.$queryRawUnsafe<Array<Record<string, any>>>(
+      `SELECT id, external_code, receive_store, receiver_name, receiver_phone,
+              receiver_address, sku_code, sku_name, sku_quantity, sku_spec, remark, created_at
+       FROM orders ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      pageSize, offset
+    );
+    const totalResult = await prisma.$queryRawUnsafe<Array<Record<string, any>>>(
+      'SELECT COUNT(*) as cnt FROM orders'
+    );
+    const total = Number(totalResult[0]?.cnt || 0);
 
     return NextResponse.json({
-      orders: orders.map((o: OrderRow) => ({
-        id: o.id,
-        externalCode: o.externalCode,
-        receiverStore: o.receiverStore,
-        receiverName: o.receiverName,
-        receiverPhone: o.receiverPhone,
-        receiverAddress: o.receiverAddress,
+      orders: orders.map((o: any) => ({
+        id: String(o.id),
+        externalCode: o.external_code,
+        receiverStore: o.receive_store,
+        receiverName: o.receiver_name,
+        receiverPhone: o.receiver_phone,
+        receiverAddress: o.receiver_address,
         totalAmount: 0,
-        skuCode: o.skuCode,
-        skuName: o.skuName,
-        skuQuantity: o.skuQuantity,
-        skuSpec: o.skuSpec,
+        skuCode: o.sku_code,
+        skuName: o.sku_name,
+        skuQuantity: String(o.sku_quantity || ''),
+        skuSpec: o.sku_spec,
         remark: o.remark,
       })),
       total,
@@ -67,10 +59,9 @@ export async function GET(req: NextRequest) {
       totalPages: Math.ceil(total / pageSize),
     });
   } catch (error: any) {
-    // 任何错误都返回结构化信息，不做 500 crash
     return NextResponse.json({
       error: error.message || '未知错误',
-      hint: 'V2 数据库暂未连接或查询失败，请配置 DATABASE_URL',
+      hint: 'V2 数据库查询失败',
       shouldDegrade: true,
     }, { status: 503 });
   }

@@ -55,4 +55,6 @@ model Order {
   errorMsg          String?
   
   createdAt         DateTime @default(now())
+
+  @@map("orders")
 }
