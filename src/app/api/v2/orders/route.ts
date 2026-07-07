@@ -15,6 +15,7 @@ function unauthorized() {
 
 /**
  * GET /api/v2/orders?page=1&pageSize=50
+ * GET /api/v2/orders?externalCode=XXX&skuCode=YYY  (精确匹配查询)
  * 按条件查询运单列表（分页）— 使用 raw SQL 适配实际表结构
  */
 export async function GET(req: NextRequest) {
@@ -22,6 +23,29 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
+    const externalCode = searchParams.get('externalCode');
+    const skuCode = searchParams.get('skuCode');
+
+    // 如果传了 externalCode + skuCode，做精确匹配查询
+    if (externalCode && skuCode) {
+      const rows = await prisma.$queryRawUnsafe<Array<Record<string, any>>>(
+        `SELECT id, external_code, receive_store, receiver_name, receiver_phone,
+                receiver_address, sku_code, sku_name, sku_quantity, sku_spec, remark, created_at
+         FROM orders WHERE external_code = $1 AND sku_code = $2 LIMIT 1`,
+        externalCode, skuCode
+      );
+      return NextResponse.json({
+        found: rows.length > 0,
+        order: rows.length > 0 ? {
+          id: String(rows[0].id),
+          externalCode: rows[0].external_code,
+          skuCode: rows[0].sku_code,
+          skuName: rows[0].sku_name,
+          skuQuantity: String(rows[0].sku_quantity || ''),
+        } : null,
+      });
+    }
+
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
     const offset = (page - 1) * pageSize;
